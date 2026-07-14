@@ -17,6 +17,11 @@ app_files <- c(
     "sha/curated_gene_symbols",
     pattern = "\\.rds$",
     full.names = TRUE
+  ),
+  list.files(
+    "curated_datasets/lenz",
+    pattern = "\\.rds$",
+    full.names = TRUE
   )
 )
 

@@ -16,6 +16,10 @@ default_grouping_methods <- c("median", "quartile")
 default_target_genes <- c("MYC", "BCL2", "BCL6", "CXCR4", "CXCL12", "CD82")
 drop_values <- c("", "n/a", "NA", "NaN")
 
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0 || is.na(x)) y else x
+}
+
 analysis_datasets <- function(data_dir = analysis_data_dir) {
   list(
     total = list(
@@ -34,8 +38,8 @@ analysis_datasets <- function(data_dir = analysis_data_dir) {
 }
 
 survival_outcomes <- list(
-  OS = list(time = "Mesi_OS", event = "Evento_OS"),
-  PFS = list(time = "Mesi_PFS", event = "Evento_PFS")
+  OS = list(time = "Mesi_OS", event = "Evento_OS", xlab = "Time (months)", break_time_by = 12, axis_step = 6, axis_padding = 2, axis_left_padding = 5),
+  PFS = list(time = "Mesi_PFS", event = "Evento_PFS", xlab = "Time (months)", break_time_by = 12, axis_step = 6, axis_padding = 2, axis_left_padding = 5)
 )
 
 survival_stratifications <- list(
@@ -391,13 +395,56 @@ survival_palette <- function(n) {
   }
 }
 
+survival_group_palette <- function(groups) {
+  groups <- as.character(groups)
+  base_low <- "#0072B2"
+  base_high <- "#D55E00"
+  modifier_low <- c("#56B4E9", "#0072B2", "#8EC9F0", "#004C99", "#78A9CF", "#2B6F9E")
+  modifier_high <- c("#E69F00", "#D55E00", "#F0C36A", "#A64000", "#E07B39", "#B86B00")
+
+  if (setequal(groups, c("LOW", "HIGH"))) {
+    return(unname(c(LOW = base_low, HIGH = base_high)[groups]))
+  }
+
+  expression_part <- ifelse(grepl("_HIGH$", groups), "HIGH", ifelse(grepl("_LOW$", groups), "LOW", NA_character_))
+  modifier_part <- sub("_(HIGH|LOW)$", "", groups)
+  modifiers <- unique(modifier_part[!is.na(expression_part)])
+
+  if (length(modifiers) > 0 && all(!is.na(expression_part))) {
+    colors <- vapply(seq_along(groups), function(i) {
+      modifier_index <- match(modifier_part[[i]], modifiers)
+      if (expression_part[[i]] == "LOW") {
+        modifier_low[[((modifier_index - 1) %% length(modifier_low)) + 1]]
+      } else {
+        modifier_high[[((modifier_index - 1) %% length(modifier_high)) + 1]]
+      }
+    }, character(1))
+    return(unname(colors))
+  }
+
+  survival_palette(length(groups))
+}
+
+survival_axis_config <- function(outcome, max_time) {
+  axis_step <- outcome$axis_step %||% 6
+  axis_padding <- outcome$axis_padding %||% 2
+  axis_left_padding <- outcome$axis_left_padding %||% 5
+  x_axis_max <- ceiling((max_time + axis_padding) / axis_step) * axis_step
+  x_axis_min <- -min(axis_left_padding, x_axis_max * 0.065)
+  list(
+    x_axis_min = x_axis_min,
+    x_axis_max = x_axis_max,
+    breaks = seq(0, x_axis_max, by = outcome$break_time_by %||% 12),
+    xlab = outcome$xlab %||% "Time (months)"
+  )
+}
+
 make_survival_plot <- function(fit_result, dataset_name, gene, grouping, outcome_name, analysis_type) {
   levels_group <- levels(fit_result$data$survival_group)
   n_groups <- length(levels_group)
   outcome <- survival_outcomes[[outcome_name]]
   max_time <- max(fit_result$data[[outcome$time]], na.rm = TRUE)
-  x_axis_max <- ceiling((max_time + 2) / 6) * 6
-  x_axis_min <- -min(5, x_axis_max * 0.065)
+  axis <- survival_axis_config(outcome, max_time)
   risk_table_height <- min(0.45, max(0.24, 0.08 + 0.055 * n_groups))
   risk_table_font_size <- dplyr::case_when(
     n_groups <= 2 ~ 4.8,
@@ -414,14 +461,14 @@ make_survival_plot <- function(fit_result, dataset_name, gene, grouping, outcome
     risk.table.title = "",
     risk.table.height = risk_table_height,
     risk.table.fontsize = risk_table_font_size,
-    xlim = c(x_axis_min, x_axis_max),
-    break.time.by = 12,
-    xlab = "Time (months)",
+    xlim = c(axis$x_axis_min, axis$x_axis_max),
+    break.time.by = outcome$break_time_by %||% 12,
+    xlab = axis$xlab,
     ylab = paste0(outcome_name, " probability"),
     title = paste(gene, outcome_name, dataset_name, analysis_type, grouping, sep = " - "),
     legend.title = "Group",
     legend.labs = levels_group,
-    palette = survival_palette(n_groups),
+    palette = survival_group_palette(levels_group),
     ggtheme = theme_bw(base_size = 11) +
       theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)),
     risk.table.y.text = FALSE,
@@ -430,13 +477,13 @@ make_survival_plot <- function(fit_result, dataset_name, gene, grouping, outcome
 
   suppressMessages(suppressWarnings({
     plot$plot <- plot$plot +
-      scale_x_continuous(limits = c(x_axis_min, x_axis_max), breaks = seq(0, x_axis_max, by = 12), expand = expansion(mult = c(0.005, 0.015))) +
+      scale_x_continuous(limits = c(axis$x_axis_min, axis$x_axis_max), breaks = axis$breaks, expand = expansion(mult = c(0.005, 0.015))) +
       scale_y_continuous(limits = c(0, 1.03), expand = expansion(mult = c(0.015, 0.035))) +
-      coord_cartesian(xlim = c(x_axis_min, x_axis_max), ylim = c(0, 1.03), clip = "off") +
+      coord_cartesian(xlim = c(axis$x_axis_min, axis$x_axis_max), ylim = c(0, 1.03), clip = "off") +
       theme(plot.title = element_text(size = 11, face = "bold"))
     plot$table <- plot$table +
-      scale_x_continuous(limits = c(x_axis_min, x_axis_max), breaks = seq(0, x_axis_max, by = 12), expand = expansion(mult = c(0.005, 0.015))) +
-      coord_cartesian(xlim = c(x_axis_min, x_axis_max), clip = "off")
+      scale_x_continuous(limits = c(axis$x_axis_min, axis$x_axis_max), breaks = axis$breaks, expand = expansion(mult = c(0.005, 0.015))) +
+      coord_cartesian(xlim = c(axis$x_axis_min, axis$x_axis_max), clip = "off")
   }))
 
   list(
@@ -960,5 +1007,528 @@ run_correlation_analysis <- function(dataset_name, gene, target_gene,
     sample_values = sample_values,
     plot = plot,
     output_paths = output_paths
+  )
+}
+
+.app_cache <- new.env(parent = emptyenv())
+
+app_dataset_registry <- function(project_dir = ".") {
+  project_dir <- normalizePath(project_dir, mustWork = FALSE)
+  cache_key <- paste("registry", project_dir, sep = "::")
+  if (exists(cache_key, envir = .app_cache, inherits = FALSE)) {
+    return(get(cache_key, envir = .app_cache, inherits = FALSE))
+  }
+
+  sha_dir <- file.path(project_dir, analysis_data_dir)
+  lenz_dir <- file.path(project_dir, "curated_datasets", "lenz")
+  lenz_info_path <- file.path(lenz_dir, "dataset_info.rds")
+  lenz_info <- if (file.exists(lenz_info_path)) readRDS(lenz_info_path) else NULL
+
+  registry <- list()
+
+  if (all(file.exists(unlist(analysis_datasets(sha_dir))))) {
+    registry$sha_remodlb <- list(
+      id = "sha_remodlb",
+      label = "Sha/REMoDLB",
+      reference = "Sha et al. / REMoDLB",
+      summary = "928 patients; R-CHOP and R-B-CHOP arms; OS and PFS; COO, MYC/BCL2/BCL6 rearrangements, double-hit and double-expressor annotations.",
+      data_type = "Microarray expression, curated gene symbols",
+      loader = "sha",
+      data_dir = sha_dir,
+      cohorts = list(
+        total = list(label = "Total", n = 928),
+        rchop = list(label = "R-CHOP", n = 469),
+        rbchop = list(label = "R-B-CHOP", n = 459)
+      ),
+      outcomes = survival_outcomes,
+      stratifications = survival_stratifications,
+      boxplot_comparisons = boxplot_comparisons,
+      default_cohort = "total",
+      default_outcome = "PFS",
+      default_stratification = "basic",
+      default_boxplot = "MYC_RNA"
+    )
+  }
+
+  if (all(file.exists(file.path(lenz_dir, c("expression.rds", "clinical.rds"))))) {
+    lenz_cohorts <- if (!is.null(lenz_info$cohorts)) lenz_info$cohorts else list(
+      total = list(label = "Total", n = NA_integer_),
+      chop = list(label = "CHOP", filter_column = "Treatment", filter_value = "CHOP", n = NA_integer_),
+      rchop = list(label = "R-CHOP", filter_column = "Treatment", filter_value = "R-CHOP", n = NA_integer_)
+    )
+    registry$lenz_gse10846 <- list(
+      id = "lenz_gse10846",
+      label = lenz_info$display_name %||% "Lenz GSE10846",
+      reference = lenz_info$reference_label %||% "Lenz et al. GSE10846",
+      summary = paste0(
+        lenz_info$n_samples %||% 414, " patients; CHOP and R-CHOP cohorts; OS only; ",
+        "COO, stage, gender, and treatment annotations. PFS and rearrangement metadata are not available in the inspected public files."
+      ),
+      data_type = lenz_info$expression_type %||% "Microarray expression, gene symbols",
+      loader = "single_expression_clinical",
+      data_dir = lenz_dir,
+      expression = file.path(lenz_dir, "expression.rds"),
+      clinical = file.path(lenz_dir, "clinical.rds"),
+      cohorts = lenz_cohorts,
+      outcomes = list(OS = list(time = "OS_years", event = "OS_event", label = "Overall survival", xlab = "Time (years)", break_time_by = 1, axis_step = 1, axis_padding = 0.5, axis_left_padding = 0.4)),
+      stratifications = list(
+        basic = list(type = "expression_only", label = "Gene expression"),
+        myc_expression = list(type = "computed", column = "MYC_expression_group", label = "MYC expression median"),
+        treatment = list(type = "metadata", column = "Treatment", label = "Treatment", order = c("CHOP", "R-CHOP"), available_in = "total"),
+        coo_class = list(type = "metadata", column = "COO_class", label = "COO class", order = c("GCB", "ABC", "UNC")),
+        stage = list(type = "metadata", column = "Stage", label = "Stage", order = c("1", "2", "3", "4")),
+        gender = list(type = "metadata", column = "Gender", label = "Gender", order = c("female", "male"))
+      ),
+      boxplot_comparisons = list(
+        Treatment = list(column = "Treatment", title = "Treatment group", order = c("CHOP", "R-CHOP"), available_in = "total"),
+        COO_class = list(column = "COO_class", title = "COO class", order = c("GCB", "ABC", "UNC")),
+        Stage = list(column = "Stage", title = "Ann Arbor stage", order = c("1", "2", "3", "4")),
+        Gender = list(column = "Gender", title = "Gender", order = c("female", "male"))
+      ),
+      default_cohort = "total",
+      default_outcome = "OS",
+      default_stratification = "basic",
+      default_boxplot = "COO_class"
+    )
+  }
+
+  assign(cache_key, registry, envir = .app_cache)
+  registry
+}
+
+app_dataset_choices <- function(project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  stats::setNames(names(registry), vapply(registry, `[[`, character(1), "label"))
+}
+
+app_cohort_choices <- function(dataset_id, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  dataset <- registry[[dataset_id]]
+  stats::setNames(names(dataset$cohorts), vapply(dataset$cohorts, function(x) paste0(x$label, if (!is.null(x$n) && !is.na(x$n)) paste0(" (n=", x$n, ")") else ""), character(1)))
+}
+
+load_app_dataset <- function(dataset_id, cohort_id, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  if (!dataset_id %in% names(registry)) {
+    stop("Unknown app dataset: ", dataset_id)
+  }
+  dataset <- registry[[dataset_id]]
+
+  if (identical(dataset$loader, "sha")) {
+    loaded <- load_dataset(cohort_id, dataset$data_dir)
+  } else {
+    expression <- readRDS(dataset$expression)
+    clinical <- readRDS(dataset$clinical)
+    clinical$Sample_ID <- as.character(clinical$Sample_ID)
+    cohort <- dataset$cohorts[[cohort_id]]
+    if (is.null(cohort)) {
+      stop("Unknown cohort: ", cohort_id)
+    }
+    if (!is.null(cohort$filter_column) && !is.null(cohort$filter_value)) {
+      clinical <- clinical %>%
+        filter(.data[[cohort$filter_column]] %in% cohort$filter_value)
+      expression <- expression[, clinical$Sample_ID, drop = FALSE]
+    }
+    clinical <- clinical[match(colnames(expression), clinical$Sample_ID), , drop = FALSE]
+    loaded <- list(expression = expression, clinical = clinical)
+  }
+
+  if (!identical(colnames(loaded$expression), loaded$clinical$Sample_ID)) {
+    stop("Could not align clinical metadata to expression columns for ", dataset_id, " / ", cohort_id)
+  }
+
+  loaded$dataset_label <- dataset$label
+  loaded$cohort_label <- dataset$cohorts[[cohort_id]]$label
+  loaded
+}
+
+load_app_clinical <- function(dataset_id, cohort_id, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  if (!dataset_id %in% names(registry)) {
+    stop("Unknown app dataset: ", dataset_id)
+  }
+  dataset <- registry[[dataset_id]]
+  cohort <- dataset$cohorts[[cohort_id]]
+  if (is.null(cohort)) {
+    stop("Unknown cohort: ", cohort_id)
+  }
+
+  if (identical(dataset$loader, "sha")) {
+    datasets <- analysis_datasets(dataset$data_dir)
+    clinical <- readRDS(datasets[[cohort_id]]$clinical)
+  } else {
+    clinical <- readRDS(dataset$clinical)
+    clinical$Sample_ID <- as.character(clinical$Sample_ID)
+    if (!is.null(cohort$filter_column) && !is.null(cohort$filter_value)) {
+      clinical <- clinical %>%
+        filter(.data[[cohort$filter_column]] %in% cohort$filter_value)
+    }
+  }
+
+  clinical
+}
+
+app_available_genes <- function(dataset_id, cohort_id = NULL, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  cohort_id <- cohort_id %||% registry[[dataset_id]]$default_cohort
+  cache_key <- paste("genes", normalizePath(project_dir, mustWork = FALSE), dataset_id, sep = "::")
+  if (exists(cache_key, envir = .app_cache, inherits = FALSE)) {
+    return(get(cache_key, envir = .app_cache, inherits = FALSE))
+  }
+
+  dataset <- registry[[dataset_id]]
+  expression_path <- if (identical(dataset$loader, "sha")) {
+    file.path(dataset$data_dir, "sha_total_expression.rds")
+  } else {
+    dataset$expression
+  }
+  genes <- rownames(readRDS(expression_path))
+  assign(cache_key, genes, envir = .app_cache)
+  genes
+}
+
+available_config_items <- function(items, clinical, cohort_id, genes = NULL) {
+  keep <- vapply(items, function(item) {
+    if (!is.null(item$available_in) && !cohort_id %in% item$available_in) {
+      return(FALSE)
+    }
+    if (identical(item$type, "expression_only")) {
+      return(TRUE)
+    }
+    if (identical(item$type, "computed")) {
+      return(is.null(genes) || "MYC" %in% genes)
+    }
+    column <- item$column
+    if (is.null(column) || !column %in% colnames(clinical)) {
+      return(FALSE)
+    }
+    values <- as.character(clinical[[column]])
+    values <- values[!is.na(values) & !tolower(values) %in% tolower(drop_values)]
+    dplyr::n_distinct(values) >= 2
+  }, logical(1))
+  items[keep]
+}
+
+app_outcomes <- function(dataset_id, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  registry[[dataset_id]]$outcomes
+}
+
+app_survival_stratifications <- function(dataset_id, cohort_id, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  clinical <- load_app_clinical(dataset_id, cohort_id, project_dir)
+  genes <- app_available_genes(dataset_id, cohort_id, project_dir)
+  available_config_items(registry[[dataset_id]]$stratifications, clinical, cohort_id, genes)
+}
+
+app_boxplot_comparisons <- function(dataset_id, cohort_id, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  clinical <- load_app_clinical(dataset_id, cohort_id, project_dir)
+  genes <- app_available_genes(dataset_id, cohort_id, project_dir)
+  available_config_items(registry[[dataset_id]]$boxplot_comparisons, clinical, cohort_id, genes)
+}
+
+app_dataset_summary <- function(dataset_id, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  dataset <- registry[[dataset_id]]
+  cohort_labels <- paste(vapply(dataset$cohorts, `[[`, character(1), "label"), collapse = ", ")
+  outcome_labels <- paste(names(dataset$outcomes), collapse = ", ")
+  list(
+    title = dataset$label,
+    reference = dataset$reference,
+    summary = dataset$summary,
+    data_type = dataset$data_type,
+    cohorts = cohort_labels,
+    outcomes = outcome_labels
+  )
+}
+
+make_gene_data_app <- function(expression, clinical, gene) {
+  if (!gene %in% rownames(expression)) {
+    stop("Gene not found in expression matrix: ", gene)
+  }
+  gene_expression <- as.numeric(expression[gene, clinical$Sample_ID])
+  data <- clinical %>%
+    mutate(
+      gene = gene,
+      expression = gene_expression
+    )
+
+  if ("MYC" %in% rownames(expression)) {
+    myc_expression <- as.numeric(expression["MYC", clinical$Sample_ID])
+    myc_cutoff <- median(myc_expression, na.rm = TRUE)
+    data <- data %>%
+      mutate(
+        MYC_expression = myc_expression,
+        MYC_expression_cutoff = myc_cutoff,
+        MYC_expression_group = if_else(MYC_expression >= myc_cutoff, "MYC_HIGH", "MYC_LOW")
+      )
+  }
+
+  data
+}
+
+make_survival_data_app <- function(grouped, analysis_type, stratifications, min_modifier_n = 5) {
+  if (!analysis_type %in% names(stratifications)) {
+    stop("Unknown survival stratification: ", analysis_type)
+  }
+
+  stratification <- stratifications[[analysis_type]]
+
+  if (stratification$type == "expression_only") {
+    return(
+      grouped %>%
+        mutate(
+          modifier = "none",
+          modifier_group = "none",
+          modifier_group_raw = "none",
+          survival_group = expression_group
+        )
+    )
+  }
+
+  if (!stratification$column %in% colnames(grouped)) {
+    stop("Clinical/derived column not found: ", stratification$column)
+  }
+
+  grouped %>%
+    mutate(modifier_group_raw = as.character(.data[[stratification$column]])) %>%
+    filter(
+      !is.na(modifier_group_raw),
+      !tolower(modifier_group_raw) %in% tolower(drop_values)
+    ) %>%
+    mutate(
+      modifier_group = if ("labels" %in% names(stratification)) {
+        dplyr::recode(modifier_group_raw, !!!stratification$labels, .default = toupper(modifier_group_raw))
+      } else {
+        toupper(modifier_group_raw)
+      },
+      modifier_order = if ("order" %in% names(stratification)) {
+        match(modifier_group_raw, stratification$order)
+      } else {
+        match(modifier_group_raw, unique(modifier_group_raw))
+      }
+    ) %>%
+    filter(!is.na(modifier_order)) %>%
+    add_count(modifier_group, name = "modifier_n") %>%
+    filter(modifier_n >= min_modifier_n) %>%
+    arrange(modifier_order, modifier_group_raw, expression_group) %>%
+    mutate(
+      modifier = stratification$column,
+      modifier_group = factor(modifier_group, levels = unique(modifier_group)),
+      survival_group = paste(as.character(modifier_group), expression_group, sep = "_")
+    ) %>%
+    select(-modifier_order, -modifier_n)
+}
+
+summarise_survival_fit_app <- function(fit_result, dataset_label, cohort_label, gene, grouping, outcome_name, analysis_type, outcomes) {
+  data <- fit_result$data
+  outcome_def <- outcomes[[outcome_name]]
+
+  group_counts <- data %>%
+    count(survival_group, name = "n_group") %>%
+    mutate(survival_group = as.character(survival_group))
+
+  event_counts <- data %>%
+    group_by(survival_group) %>%
+    summarise(events = sum(.data[[outcome_def$event]] == 1), .groups = "drop") %>%
+    mutate(survival_group = as.character(survival_group))
+
+  med <- surv_median(fit_result$fit)
+  median_stats <- setNames(med$median, sub("^survival_group=", "", med$strata))
+
+  tibble(
+    dataset = dataset_label,
+    cohort = cohort_label,
+    gene = gene,
+    analysis_type = analysis_type,
+    grouping = grouping,
+    outcome = outcome_name,
+    pvalue_logrank = fit_result$pvalue,
+    n_total = nrow(data),
+    cutoff_low = unique(data$cutoff_low),
+    cutoff_high = unique(data$cutoff_high),
+    myc_expression_cutoff = if ("MYC_expression_cutoff" %in% names(data)) unique(data$MYC_expression_cutoff) else NA_real_,
+    max_time = max(data[[outcome_def$time]], na.rm = TRUE)
+  ) %>%
+    crossing(survival_group = as.character(levels(data$survival_group))) %>%
+    left_join(group_counts, by = "survival_group") %>%
+    left_join(event_counts, by = "survival_group") %>%
+    mutate(median_survival = unname(median_stats[survival_group]))
+}
+
+make_survival_plot_app <- function(fit_result, dataset_label, cohort_label, gene, grouping, outcome_name, analysis_type, outcomes) {
+  levels_group <- levels(fit_result$data$survival_group)
+  n_groups <- length(levels_group)
+  outcome <- outcomes[[outcome_name]]
+  max_time <- max(fit_result$data[[outcome$time]], na.rm = TRUE)
+  axis <- survival_axis_config(outcome, max_time)
+  risk_table_height <- min(0.45, max(0.24, 0.08 + 0.055 * n_groups))
+  risk_table_font_size <- dplyr::case_when(
+    n_groups <= 2 ~ 4.8,
+    n_groups <= 4 ~ 4.0,
+    TRUE ~ 3.4
+  )
+
+  plot <- suppressMessages(suppressWarnings(ggsurvplot(
+    fit_result$fit,
+    data = fit_result$data,
+    conf.int = FALSE,
+    pval = TRUE,
+    risk.table = TRUE,
+    risk.table.title = "",
+    risk.table.height = risk_table_height,
+    risk.table.fontsize = risk_table_font_size,
+    xlim = c(axis$x_axis_min, axis$x_axis_max),
+    break.time.by = outcome$break_time_by %||% 12,
+    xlab = axis$xlab,
+    ylab = paste0(outcome_name, " probability"),
+    title = paste(gene, outcome_name, dataset_label, cohort_label, analysis_type, grouping, sep = " - "),
+    legend.title = "Group",
+    legend.labs = levels_group,
+    palette = survival_group_palette(levels_group),
+    ggtheme = theme_bw(base_size = 11) +
+      theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)),
+    risk.table.y.text = FALSE,
+    tables.theme = theme_bw(base_size = 10)
+  )))
+
+  suppressMessages(suppressWarnings({
+    plot$plot <- plot$plot +
+      scale_x_continuous(limits = c(axis$x_axis_min, axis$x_axis_max), breaks = axis$breaks, expand = expansion(mult = c(0.005, 0.015))) +
+      scale_y_continuous(limits = c(0, 1.03), expand = expansion(mult = c(0.015, 0.035))) +
+      coord_cartesian(xlim = c(axis$x_axis_min, axis$x_axis_max), ylim = c(0, 1.03), clip = "off") +
+      theme(plot.title = element_text(size = 11, face = "bold"))
+    plot$table <- plot$table +
+      scale_x_continuous(limits = c(axis$x_axis_min, axis$x_axis_max), breaks = axis$breaks, expand = expansion(mult = c(0.005, 0.015))) +
+      coord_cartesian(xlim = c(axis$x_axis_min, axis$x_axis_max), clip = "off")
+  }))
+
+  list(
+    plot = plot$plot,
+    risk_table = plot$table,
+    risk_table_export_height = max(2, 1.1 + 0.42 * n_groups)
+  )
+}
+
+survival_sample_groups_app <- function(fit_result, dataset_label, cohort_label, gene, grouping, outcome_name, analysis_type) {
+  data <- fit_result$data %>%
+    mutate(
+      dataset = dataset_label,
+      cohort = cohort_label,
+      gene = gene,
+      analysis_type = analysis_type,
+      grouping = grouping,
+      outcome = outcome_name
+    )
+  preferred <- c(
+    "dataset", "cohort", "gene", "analysis_type", "grouping", "outcome",
+    "Sample_ID", "expression", "expression_group", "MYC_expression",
+    "MYC_expression_group", "modifier", "modifier_group", "modifier_group_raw",
+    "survival_group", "cutoff_low", "cutoff_high", "MYC_expression_cutoff"
+  )
+  data %>% select(any_of(preferred), everything())
+}
+
+run_app_survival_analysis <- function(dataset_id, cohort_id, gene, grouping, outcome_name, analysis_type,
+                                      project_dir = ".", min_modifier_n = 5) {
+  registry <- app_dataset_registry(project_dir)
+  dataset_config <- registry[[dataset_id]]
+  dataset <- load_app_dataset(dataset_id, cohort_id, project_dir)
+  stratifications <- app_survival_stratifications(dataset_id, cohort_id, project_dir)
+  outcomes <- dataset_config$outcomes
+
+  gene_data <- make_gene_data_app(dataset$expression, dataset$clinical, gene)
+  grouped <- add_expression_group(gene_data, grouping)
+  analysis_data <- make_survival_data_app(grouped, analysis_type, stratifications, min_modifier_n)
+  fit_result <- fit_survival(analysis_data, outcomes[[outcome_name]])
+
+  if (is.null(fit_result)) {
+    return(list(valid = FALSE, reason = "Fewer than two survival groups after filtering"))
+  }
+
+  summary_rows <- summarise_survival_fit_app(fit_result, dataset_config$label, dataset$cohort_label, gene, grouping, outcome_name, analysis_type, outcomes)
+  sample_groups <- survival_sample_groups_app(fit_result, dataset_config$label, dataset$cohort_label, gene, grouping, outcome_name, analysis_type)
+  plots <- make_survival_plot_app(fit_result, dataset_config$label, dataset$cohort_label, gene, grouping, outcome_name, analysis_type, outcomes)
+
+  list(
+    valid = TRUE,
+    data = fit_result$data,
+    fit = fit_result$fit,
+    pvalue = fit_result$pvalue,
+    summary = summary_rows,
+    sample_groups = sample_groups,
+    plot = plots$plot,
+    risk_table = plots$risk_table,
+    risk_table_export_height = plots$risk_table_export_height
+  )
+}
+
+run_app_boxplot_analysis <- function(dataset_id, cohort_id, gene, comparison_name,
+                                     project_dir = ".", min_group_n = 5) {
+  registry <- app_dataset_registry(project_dir)
+  dataset_config <- registry[[dataset_id]]
+  comparisons <- app_boxplot_comparisons(dataset_id, cohort_id, project_dir)
+  if (!comparison_name %in% names(comparisons)) {
+    stop("Unknown boxplot comparison: ", comparison_name)
+  }
+
+  dataset <- load_app_dataset(dataset_id, cohort_id, project_dir)
+  cohort_label <- dataset$cohort_label
+  comparison <- comparisons[[comparison_name]]
+  plot_data <- make_boxplot_data(dataset$expression, dataset$clinical, gene, comparison)
+  validation <- validate_boxplot_data(plot_data, min_group_n)
+
+  if (!validation$valid) {
+    return(list(valid = FALSE, reason = validation$reason))
+  }
+
+  plot_data <- validation$data
+  test_result <- run_association_test(plot_data)
+  comparison_label <- paste(cohort_label, comparison_name, sep = "_")
+  pairwise_rows <- run_pairwise_tests(plot_data, dataset_config$label, gene, comparison_label) %>%
+    mutate(cohort = cohort_label, .after = dataset)
+  summary_rows <- summarise_boxplot_groups(plot_data, dataset_config$label, gene, comparison_label, test_result) %>%
+    mutate(cohort = cohort_label, .after = dataset)
+  plot_result <- make_boxplot(plot_data, paste(dataset_config$label, cohort_label, sep = " - "), gene, comparison_name, comparison, pairwise_rows)
+  sample_groups <- boxplot_sample_groups(plot_data, dataset_config$label, gene, comparison_label) %>%
+    mutate(cohort = cohort_label, .after = dataset)
+
+  list(
+    valid = TRUE,
+    data = plot_data,
+    test = test_result,
+    summary = summary_rows,
+    pairwise = pairwise_rows,
+    sample_groups = sample_groups,
+    plot = plot_result$plot,
+    plot_width = plot_result$width,
+    plot_height = plot_result$height
+  )
+}
+
+run_app_correlation_analysis <- function(dataset_id, cohort_id, gene, target_gene, project_dir = ".") {
+  registry <- app_dataset_registry(project_dir)
+  dataset_config <- registry[[dataset_id]]
+  dataset <- load_app_dataset(dataset_id, cohort_id, project_dir)
+  correlation_data <- make_correlation_data(dataset$expression, dataset$clinical, gene, target_gene)
+
+  if (nrow(correlation_data) < 3) {
+    return(list(valid = FALSE, reason = "Fewer than three complete samples."))
+  }
+
+  test_rows <- run_correlation_tests(correlation_data)
+  dataset_label <- paste(dataset_config$label, dataset$cohort_label, sep = " - ")
+  summary_rows <- summarise_correlation(correlation_data, test_rows, dataset_label, gene, target_gene)
+  plot <- make_correlation_plot(correlation_data, test_rows, dataset_label, gene, target_gene)
+  sample_values <- correlation_sample_values(correlation_data, dataset_label, gene, target_gene)
+
+  list(
+    valid = TRUE,
+    data = correlation_data,
+    tests = test_rows,
+    summary = summary_rows,
+    sample_values = sample_values,
+    plot = plot
   )
 }

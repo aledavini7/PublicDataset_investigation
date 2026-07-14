@@ -6,6 +6,12 @@
 # Generated analysis outputs can be rebuilt by the scripts.
 results/
 
+# Raw and curated multi-dataset inputs are local data assets.
+external_datasets_raw/*
+!external_datasets_raw/.gitkeep
+curated_datasets/*
+!curated_datasets/.gitkeep
+
 # Local project notes and legacy exploratory script.
 context.txt
 Public_dataset_investigation.R

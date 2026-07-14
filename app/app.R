@@ -7,8 +7,10 @@ project_dir <- normalizePath(
 )
 source(file.path(project_dir, "scripts", "analysis_functions.R"))
 
-gene_choices <- available_genes("total", file.path(project_dir, analysis_data_dir))
-dataset_choices <- names(analysis_datasets(file.path(project_dir, analysis_data_dir)))
+dataset_choices <- app_dataset_choices(project_dir)
+default_dataset <- if ("sha_remodlb" %in% unname(dataset_choices)) "sha_remodlb" else unname(dataset_choices)[[1]]
+default_cohort <- app_dataset_registry(project_dir)[[default_dataset]]$default_cohort
+gene_choices <- app_available_genes(default_dataset, default_cohort, project_dir)
 default_gene <- if ("MYC" %in% gene_choices) "MYC" else gene_choices[[1]]
 default_target <- if ("MYC" %in% gene_choices) "MYC" else gene_choices[[1]]
 
@@ -40,6 +42,12 @@ ui <- fluidPage(
       .nav-tabs > li > a { border-radius: 4px 4px 0 0; color: #334155; font-weight: 600; }
       .plot-wrap { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 4px; padding: 8px; margin-bottom: 12px; overflow-x: auto; }
       .status-text { color: #667085; font-size: 12px; margin: 4px 0 10px; }
+      .dataset-selector { background: #eaf5ff; border: 1px solid #b9ddff; border-radius: 6px; padding: 10px 10px 2px; margin: 0 0 12px; }
+      .dataset-selector .control-label { color: #155a8a; }
+      .dataset-selector .selectize-input, .dataset-selector .form-control { border-color: #9bcaf5; background: #ffffff; }
+      .dataset-card { background: #eef6f7; border: 1px solid #bfdadd; border-radius: 6px; padding: 12px 14px; margin-bottom: 14px; }
+      .dataset-card h2 { margin: 0 0 6px; font-size: 16px; }
+      .dataset-card p { margin: 3px 0; font-size: 12.5px; color: #344054; }
       .download-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
       .export-panel { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 10px; padding: 10px; margin: 8px 0 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 4px; }
       .export-panel .form-group { margin-bottom: 0; }
@@ -57,15 +65,19 @@ ui <- fluidPage(
     div(
       class = "sidebar-panel",
       h1("DLBCL Public Dataset Explorer"),
+      div(
+        class = "dataset-selector",
+        selectInput("dataset_id", "Dataset", choices = dataset_choices, selected = default_dataset),
+        selectInput("cohort_id", "Cohort", choices = app_cohort_choices(default_dataset, project_dir), selected = default_cohort)
+      ),
       selectizeInput("gene", "Gene", choices = NULL, selected = default_gene, options = list(placeholder = "Type a gene symbol")),
-      selectInput("dataset", "Dataset", choices = dataset_choices, selected = "total"),
       h2("Survival"),
       selectInput("surv_grouping", "Expression split", choices = default_grouping_methods, selected = "median"),
-      selectInput("surv_outcome", "Outcome", choices = names(survival_outcomes), selected = "PFS"),
-      selectInput("surv_stratification", "Stratification", choices = named_labels(survival_stratifications), selected = "basic"),
+      selectInput("surv_outcome", "Outcome", choices = names(app_outcomes(default_dataset, project_dir)), selected = app_dataset_registry(project_dir)[[default_dataset]]$default_outcome),
+      selectInput("surv_stratification", "Stratification", choices = named_labels(app_survival_stratifications(default_dataset, default_cohort, project_dir)), selected = "basic"),
       actionButton("run_survival", "Run survival", class = "btn-primary"),
       h2("Boxplot"),
-      selectInput("box_comparison", "Comparison", choices = named_labels(boxplot_comparisons), selected = "MYC_RNA"),
+      selectInput("box_comparison", "Comparison", choices = named_labels(app_boxplot_comparisons(default_dataset, default_cohort, project_dir)), selected = app_dataset_registry(project_dir)[[default_dataset]]$default_boxplot),
       actionButton("run_boxplot", "Run boxplot", class = "btn-primary"),
       h2("Correlation"),
       selectizeInput("target_gene", "Target gene", choices = NULL, selected = default_target, options = list(placeholder = "Type a target gene")),
@@ -73,6 +85,7 @@ ui <- fluidPage(
     ),
     div(
       class = "main-panel",
+      uiOutput("dataset_summary"),
       tabsetPanel(
         id = "main_tabs",
         tabPanel(
@@ -140,43 +153,144 @@ server <- function(input, output, session) {
   updateSelectizeInput(session, "gene", choices = gene_choices, selected = default_gene, server = TRUE)
   updateSelectizeInput(session, "target_gene", choices = gene_choices, selected = default_target, server = TRUE)
 
+  observeEvent(input$dataset_id, {
+    registry <- app_dataset_registry(project_dir)
+    dataset <- registry[[input$dataset_id]]
+    freezeReactiveValue(input, "cohort_id")
+    freezeReactiveValue(input, "surv_outcome")
+    updateSelectInput(
+      session,
+      "cohort_id",
+      choices = app_cohort_choices(input$dataset_id, project_dir),
+      selected = dataset$default_cohort
+    )
+    updateSelectInput(
+      session,
+      "surv_outcome",
+      choices = names(dataset$outcomes),
+      selected = dataset$default_outcome
+    )
+  }, ignoreInit = TRUE)
+
+  observeEvent(list(input$dataset_id, input$cohort_id), {
+    req(input$dataset_id, input$cohort_id)
+    registry <- app_dataset_registry(project_dir)
+    dataset <- registry[[input$dataset_id]]
+    req(input$cohort_id %in% names(dataset$cohorts))
+    genes <- app_available_genes(input$dataset_id, input$cohort_id, project_dir)
+    selected_gene <- if ("MYC" %in% genes) "MYC" else genes[[1]]
+    selected_target <- if ("MYC" %in% genes) "MYC" else genes[[1]]
+    stratifications <- app_survival_stratifications(input$dataset_id, input$cohort_id, project_dir)
+    comparisons <- app_boxplot_comparisons(input$dataset_id, input$cohort_id, project_dir)
+    selected_stratification <- if (dataset$default_stratification %in% names(stratifications)) dataset$default_stratification else names(stratifications)[[1]]
+    selected_comparison <- if (dataset$default_boxplot %in% names(comparisons)) dataset$default_boxplot else names(comparisons)[[1]]
+
+    updateSelectizeInput(session, "gene", choices = genes, selected = selected_gene, server = TRUE)
+    updateSelectizeInput(session, "target_gene", choices = genes, selected = selected_target, server = TRUE)
+    updateSelectInput(session, "surv_stratification", choices = named_labels(stratifications), selected = selected_stratification)
+    updateSelectInput(session, "box_comparison", choices = named_labels(comparisons), selected = selected_comparison)
+  }, ignoreInit = TRUE)
+
+  output$dataset_summary <- renderUI({
+    req(input$dataset_id)
+    summary <- app_dataset_summary(input$dataset_id, project_dir)
+    div(
+      class = "dataset-card",
+      h2(summary$title),
+      p(strong("Reference: "), summary$reference),
+      p(summary$summary),
+      p(strong("Cohorts: "), summary$cohorts),
+      p(strong("Outcomes: "), summary$outcomes),
+      p(strong("Expression: "), summary$data_type)
+    )
+  })
+
   survival_result <- eventReactive(input$run_survival, {
-    req(input$gene, nzchar(input$gene))
+    req(input$dataset_id, input$cohort_id, input$gene, nzchar(input$gene), input$surv_outcome, input$surv_stratification)
     withProgress(message = "Running survival analysis", value = 0.2, {
-      run_survival_analysis(
-        dataset_name = input$dataset,
+      result <- run_app_survival_analysis(
+        dataset_id = input$dataset_id,
+        cohort_id = input$cohort_id,
         gene = toupper(input$gene),
         grouping = input$surv_grouping,
         outcome_name = input$surv_outcome,
         analysis_type = input$surv_stratification,
-        data_dir = file.path(project_dir, analysis_data_dir)
+        project_dir = project_dir
       )
+      result$selection <- list(
+        dataset_id = input$dataset_id,
+        cohort_id = input$cohort_id,
+        gene = toupper(input$gene),
+        grouping = input$surv_grouping,
+        outcome = input$surv_outcome,
+        stratification = input$surv_stratification
+      )
+      result
     })
   }, ignoreNULL = FALSE)
 
   boxplot_result <- eventReactive(input$run_boxplot, {
-    req(input$gene, nzchar(input$gene))
+    req(input$dataset_id, input$cohort_id, input$gene, nzchar(input$gene), input$box_comparison)
     withProgress(message = "Running boxplot analysis", value = 0.2, {
-      run_boxplot_analysis(
-        dataset_name = input$dataset,
+      result <- run_app_boxplot_analysis(
+        dataset_id = input$dataset_id,
+        cohort_id = input$cohort_id,
         gene = toupper(input$gene),
         comparison_name = input$box_comparison,
-        data_dir = file.path(project_dir, analysis_data_dir)
+        project_dir = project_dir
       )
+      result$selection <- list(
+        dataset_id = input$dataset_id,
+        cohort_id = input$cohort_id,
+        gene = toupper(input$gene),
+        comparison = input$box_comparison
+      )
+      result
     })
   }, ignoreNULL = FALSE)
 
   correlation_result <- eventReactive(input$run_correlation, {
-    req(input$gene, nzchar(input$gene), input$target_gene, nzchar(input$target_gene))
+    req(input$dataset_id, input$cohort_id, input$gene, nzchar(input$gene), input$target_gene, nzchar(input$target_gene))
     withProgress(message = "Running correlation analysis", value = 0.2, {
-      run_correlation_analysis(
-        dataset_name = input$dataset,
+      result <- run_app_correlation_analysis(
+        dataset_id = input$dataset_id,
+        cohort_id = input$cohort_id,
         gene = toupper(input$gene),
         target_gene = toupper(input$target_gene),
-        data_dir = file.path(project_dir, analysis_data_dir)
+        project_dir = project_dir
       )
+      result$selection <- list(
+        dataset_id = input$dataset_id,
+        cohort_id = input$cohort_id,
+        gene = toupper(input$gene),
+        target_gene = toupper(input$target_gene)
+      )
+      result
     })
   }, ignoreNULL = FALSE)
+
+  current_survival_selection <- function(result) {
+    isTRUE(identical(result$selection$dataset_id, input$dataset_id)) &&
+      isTRUE(identical(result$selection$cohort_id, input$cohort_id)) &&
+      isTRUE(identical(result$selection$gene, toupper(input$gene))) &&
+      isTRUE(identical(result$selection$grouping, input$surv_grouping)) &&
+      isTRUE(identical(result$selection$outcome, input$surv_outcome)) &&
+      isTRUE(identical(result$selection$stratification, input$surv_stratification))
+  }
+
+  current_boxplot_selection <- function(result) {
+    isTRUE(identical(result$selection$dataset_id, input$dataset_id)) &&
+      isTRUE(identical(result$selection$cohort_id, input$cohort_id)) &&
+      isTRUE(identical(result$selection$gene, toupper(input$gene))) &&
+      isTRUE(identical(result$selection$comparison, input$box_comparison))
+  }
+
+  current_correlation_selection <- function(result) {
+    isTRUE(identical(result$selection$dataset_id, input$dataset_id)) &&
+      isTRUE(identical(result$selection$cohort_id, input$cohort_id)) &&
+      isTRUE(identical(result$selection$gene, toupper(input$gene))) &&
+      isTRUE(identical(result$selection$target_gene, toupper(input$target_gene)))
+  }
 
   valid_result <- function(result) {
     validate(need(isTRUE(result$valid), result$reason %||% "Analysis could not be completed."))
@@ -196,6 +310,9 @@ server <- function(input, output, session) {
 
   output$survival_status <- renderText({
     result <- survival_result()
+    if (!current_survival_selection(result)) {
+      return("Selections changed. Run survival to update the plot and tables.")
+    }
     if (isTRUE(result$valid)) {
       paste("Log-rank", format_pvalue(result$pvalue), "| samples:", nrow(result$sample_groups))
     } else {
@@ -205,24 +322,28 @@ server <- function(input, output, session) {
 
   output$survival_plot <- renderPlot({
     result <- survival_result()
+    validate(need(current_survival_selection(result), "Selections changed. Run survival to update this plot."))
     valid_result(result)
     result$plot
   }, res = 120)
 
   output$survival_risk_table <- renderPlot({
     result <- survival_result()
+    validate(need(current_survival_selection(result), "Selections changed. Run survival to update this table."))
     valid_result(result)
     result$risk_table
   }, res = 120)
 
   output$survival_summary <- renderDT({
     result <- survival_result()
+    validate(need(current_survival_selection(result), "Selections changed. Run survival to update this table."))
     valid_result(result)
     datatable(result$summary, rownames = FALSE, options = list(pageLength = 8, scrollX = TRUE))
   })
 
   output$survival_samples <- renderDT({
     result <- survival_result()
+    validate(need(current_survival_selection(result), "Selections changed. Run survival to update this table."))
     valid_result(result)
     datatable(result$sample_groups, rownames = FALSE, options = list(pageLength = 12, scrollX = TRUE))
   })
@@ -236,6 +357,9 @@ server <- function(input, output, session) {
 
   output$boxplot_status <- renderText({
     result <- boxplot_result()
+    if (!current_boxplot_selection(result)) {
+      return("Selections changed. Run boxplot to update the plot and tables.")
+    }
     if (isTRUE(result$valid)) {
       paste(result$test$method, format_pvalue(result$test$pvalue), "| samples:", nrow(result$sample_groups))
     } else {
@@ -245,24 +369,30 @@ server <- function(input, output, session) {
 
   output$boxplot_plot <- renderPlot({
     result <- boxplot_result()
+    validate(need(current_boxplot_selection(result), "Selections changed. Run boxplot to update this plot."))
     valid_result(result)
     result$plot
   }, res = 120)
 
   output$boxplot_summary <- renderDT({
     result <- boxplot_result()
+    validate(need(current_boxplot_selection(result), "Selections changed. Run boxplot to update this table."))
     valid_result(result)
     datatable(result$summary, rownames = FALSE, options = list(pageLength = 8, scrollX = TRUE))
   })
 
   output$boxplot_samples <- renderDT({
     result <- boxplot_result()
+    validate(need(current_boxplot_selection(result), "Selections changed. Run boxplot to update this table."))
     valid_result(result)
     datatable(result$sample_groups, rownames = FALSE, options = list(pageLength = 12, scrollX = TRUE))
   })
 
   output$correlation_status <- renderText({
     result <- correlation_result()
+    if (!current_correlation_selection(result)) {
+      return("Selections changed. Run correlation to update the plot and tables.")
+    }
     if (isTRUE(result$valid)) {
       spearman <- result$tests[result$tests$method == "Spearman", , drop = FALSE]
       paste("Spearman rho =", format_r(spearman$estimate[[1]]), format_pvalue(spearman$pvalue[[1]]), "| samples:", nrow(result$sample_values))
@@ -273,29 +403,32 @@ server <- function(input, output, session) {
 
   output$correlation_plot <- renderPlot({
     result <- correlation_result()
+    validate(need(current_correlation_selection(result), "Selections changed. Run correlation to update this plot."))
     valid_result(result)
     result$plot
   }, res = 120)
 
   output$correlation_summary <- renderDT({
     result <- correlation_result()
+    validate(need(current_correlation_selection(result), "Selections changed. Run correlation to update this table."))
     valid_result(result)
     datatable(result$summary, rownames = FALSE, options = list(pageLength = 8, scrollX = TRUE))
   })
 
   output$correlation_values <- renderDT({
     result <- correlation_result()
+    validate(need(current_correlation_selection(result), "Selections changed. Run correlation to update this table."))
     valid_result(result)
     datatable(result$sample_values, rownames = FALSE, options = list(pageLength = 12, scrollX = TRUE))
   })
 
   output$download_survival_summary <- downloadHandler(
-    filename = function() paste("survival_summary", input$dataset, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome, "csv", sep = "."),
+    filename = function() paste("survival_summary", input$dataset_id, input$cohort_id, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome, "csv", sep = "."),
     content = function(file) write_csv(survival_result()$summary, file)
   )
   output$download_survival_plot <- downloadHandler(
     filename = function() {
-      plot_filename("survival_km", input$surv_plot_format, input$dataset, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome)
+      plot_filename("survival_km", input$surv_plot_format, input$dataset_id, input$cohort_id, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome)
     },
     content = function(file) {
       result <- survival_result()
@@ -305,7 +438,7 @@ server <- function(input, output, session) {
   )
   output$download_survival_risk <- downloadHandler(
     filename = function() {
-      plot_filename("survival_risk_table", input$surv_plot_format, input$dataset, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome)
+      plot_filename("survival_risk_table", input$surv_plot_format, input$dataset_id, input$cohort_id, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome)
     },
     content = function(file) {
       result <- survival_result()
@@ -314,7 +447,7 @@ server <- function(input, output, session) {
     }
   )
   output$download_survival_samples <- downloadHandler(
-    filename = function() paste("survival_samples", input$dataset, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome, "csv", sep = "."),
+    filename = function() paste("survival_samples", input$dataset_id, input$cohort_id, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome, "csv", sep = "."),
     content = function(file) write_csv(survival_result()$sample_groups, file)
   )
   observeEvent(boxplot_result(), {
@@ -325,12 +458,12 @@ server <- function(input, output, session) {
     }
   })
   output$download_boxplot_summary <- downloadHandler(
-    filename = function() paste("boxplot_summary", input$dataset, toupper(input$gene), input$box_comparison, "csv", sep = "."),
+    filename = function() paste("boxplot_summary", input$dataset_id, input$cohort_id, toupper(input$gene), input$box_comparison, "csv", sep = "."),
     content = function(file) write_csv(boxplot_result()$summary, file)
   )
   output$download_boxplot_plot <- downloadHandler(
     filename = function() {
-      plot_filename("boxplot", input$boxplot_format, input$dataset, toupper(input$gene), input$box_comparison)
+      plot_filename("boxplot", input$boxplot_format, input$dataset_id, input$cohort_id, toupper(input$gene), input$box_comparison)
     },
     content = function(file) {
       result <- boxplot_result()
@@ -339,16 +472,16 @@ server <- function(input, output, session) {
     }
   )
   output$download_boxplot_pairwise <- downloadHandler(
-    filename = function() paste("boxplot_pairwise", input$dataset, toupper(input$gene), input$box_comparison, "csv", sep = "."),
+    filename = function() paste("boxplot_pairwise", input$dataset_id, input$cohort_id, toupper(input$gene), input$box_comparison, "csv", sep = "."),
     content = function(file) write_csv(boxplot_result()$pairwise, file)
   )
   output$download_correlation_summary <- downloadHandler(
-    filename = function() paste("correlation_summary", input$dataset, toupper(input$gene), toupper(input$target_gene), "csv", sep = "."),
+    filename = function() paste("correlation_summary", input$dataset_id, input$cohort_id, toupper(input$gene), toupper(input$target_gene), "csv", sep = "."),
     content = function(file) write_csv(correlation_result()$summary, file)
   )
   output$download_correlation_plot <- downloadHandler(
     filename = function() {
-      plot_filename("correlation", input$correlation_format, input$dataset, toupper(input$gene), toupper(input$target_gene))
+      plot_filename("correlation", input$correlation_format, input$dataset_id, input$cohort_id, toupper(input$gene), toupper(input$target_gene))
     },
     content = function(file) {
       result <- correlation_result()
@@ -357,7 +490,7 @@ server <- function(input, output, session) {
     }
   )
   output$download_correlation_values <- downloadHandler(
-    filename = function() paste("correlation_values", input$dataset, toupper(input$gene), toupper(input$target_gene), "csv", sep = "."),
+    filename = function() paste("correlation_values", input$dataset_id, input$cohort_id, toupper(input$gene), toupper(input$target_gene), "csv", sep = "."),
     content = function(file) write_csv(correlation_result()$sample_values, file)
   )
 }
