@@ -2,6 +2,12 @@
 
 Interactive Shiny app and reproducible R scripts for exploring gene-level associations in the public Sha/REMoDLB diffuse large B-cell lymphoma dataset.
 
+## Live App
+
+The deployed Shiny app is available at:
+
+https://aledavini.shinyapps.io/dlbcl-public-dataset-explorer/
+
 The app lets users type a gene symbol and dynamically regenerate:
 
 - Kaplan-Meier survival plots and risk tables
@@ -103,4 +109,3 @@ The deployment uses `app/app.R` as the primary app file and includes `scripts/` 
 - The curated RDS files are public dataset derivatives and are required by the app.
 - Generated result plots and tables are not stored in git because users can regenerate them.
 - The app is exploratory and should be cited together with the original public dataset publication.
-
