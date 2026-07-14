@@ -22,6 +22,16 @@ app_files <- c(
     "curated_datasets/lenz",
     pattern = "\\.rds$",
     full.names = TRUE
+  ),
+  list.files(
+    "curated_datasets/chapuy",
+    pattern = "\\.rds$",
+    full.names = TRUE
+  ),
+  list.files(
+    "curated_datasets/barrans",
+    pattern = "\\.rds$",
+    full.names = TRUE
   )
 )
 

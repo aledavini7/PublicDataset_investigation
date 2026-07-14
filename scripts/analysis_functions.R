@@ -1021,8 +1021,14 @@ app_dataset_registry <- function(project_dir = ".") {
 
   sha_dir <- file.path(project_dir, analysis_data_dir)
   lenz_dir <- file.path(project_dir, "curated_datasets", "lenz")
+  chapuy_dir <- file.path(project_dir, "curated_datasets", "chapuy")
+  barrans_dir <- file.path(project_dir, "curated_datasets", "barrans")
   lenz_info_path <- file.path(lenz_dir, "dataset_info.rds")
+  chapuy_info_path <- file.path(chapuy_dir, "dataset_info.rds")
+  barrans_info_path <- file.path(barrans_dir, "dataset_info.rds")
   lenz_info <- if (file.exists(lenz_info_path)) readRDS(lenz_info_path) else NULL
+  chapuy_info <- if (file.exists(chapuy_info_path)) readRDS(chapuy_info_path) else NULL
+  barrans_info <- if (file.exists(barrans_info_path)) readRDS(barrans_info_path) else NULL
 
   registry <- list()
 
@@ -1083,6 +1089,107 @@ app_dataset_registry <- function(project_dir = ".") {
         Treatment = list(column = "Treatment", title = "Treatment group", order = c("CHOP", "R-CHOP"), available_in = "total"),
         COO_class = list(column = "COO_class", title = "COO class", order = c("GCB", "ABC", "UNC")),
         Stage = list(column = "Stage", title = "Ann Arbor stage", order = c("1", "2", "3", "4")),
+        Gender = list(column = "Gender", title = "Gender", order = c("female", "male"))
+      ),
+      default_cohort = "total",
+      default_outcome = "OS",
+      default_stratification = "basic",
+      default_boxplot = "COO_class"
+    )
+  }
+
+  if (all(file.exists(file.path(chapuy_dir, c("expression.rds", "clinical.rds"))))) {
+    chapuy_cohorts <- if (!is.null(chapuy_info$cohorts)) chapuy_info$cohorts else list(
+      total = list(label = "Total", n = NA_integer_),
+      rchop_like = list(label = "R-CHOP-like", filter_column = "RCHOP_like", filter_value = "yes", n = NA_integer_),
+      non_rchop_like = list(label = "Non-R-CHOP-like", filter_column = "RCHOP_like", filter_value = "no", n = NA_integer_)
+    )
+    registry$chapuy_gse98588 <- list(
+      id = "chapuy_gse98588",
+      label = chapuy_info$display_name %||% "Chapuy GSE98588",
+      reference = chapuy_info$reference_label %||% "Chapuy et al. Cancer Cell 2018",
+      summary = paste0(
+        chapuy_info$n_samples %||% 137, " patients; OS and PFS; R-CHOP-like treatment subset; ",
+        "COO, CCC, Chapuy genetic clusters, genomic complexity, MYC rearrangement, TP53, 6q deletion, and RNA high-low annotations."
+      ),
+      data_type = chapuy_info$expression_type %||% "Microarray expression, gene symbols",
+      loader = "single_expression_clinical",
+      data_dir = chapuy_dir,
+      expression = file.path(chapuy_dir, "expression.rds"),
+      clinical = file.path(chapuy_dir, "clinical.rds"),
+      cohorts = chapuy_cohorts,
+      outcomes = list(
+        OS = list(time = "OS_months", event = "OS_event", label = "Overall survival", xlab = "Time (months)", break_time_by = 12, axis_step = 6, axis_padding = 2, axis_left_padding = 5),
+        PFS = list(time = "PFS_months", event = "PFS_event", label = "Progression-free survival", xlab = "Time (months)", break_time_by = 12, axis_step = 6, axis_padding = 2, axis_left_padding = 5)
+      ),
+      stratifications = list(
+        basic = list(type = "expression_only", label = "Gene expression"),
+        myc_expression = list(type = "computed", column = "MYC_expression_group", label = "MYC expression median"),
+        rchop_like = list(type = "metadata", column = "RCHOP_like", label = "R-CHOP-like treatment", order = c("no", "yes"), available_in = "total", labels = c("no" = "NO", "yes" = "YES")),
+        coo_class = list(type = "metadata", column = "COO_class", label = "COO class", order = c("GCB", "ABC", "UNC")),
+        ccc_class = list(type = "metadata", column = "CCC_class", label = "CCC class", order = c("BCR", "HR", "OxPhos")),
+        chapuy_cluster = list(type = "metadata", column = "Chapuy_cluster", label = "Chapuy cluster", order = c("C0", "C1", "C2", "C3", "C4", "C5")),
+        genomic_complexity = list(type = "metadata", column = "Genomic_complexity", label = "Genomic complexity", order = c("clean", "complex")),
+        myc_rearrangement = list(type = "metadata", column = "MYC_rearrangement", label = "MYC rearrangement", order = c("not-rearranged", "rearranged"), labels = c("not-rearranged" = "WT", "rearranged" = "REARRANGED")),
+        myc_rna = list(type = "metadata", column = "MYC_RNA", label = "MYC RNA", order = c("low", "high")),
+        bcl2_rna = list(type = "metadata", column = "BCL2_RNA", label = "BCL2 RNA", order = c("low", "high")),
+        tp53_status = list(type = "metadata", column = "TP53_status", label = "TP53 status", order = c("not-mutated", "mutated")),
+        six_q_del = list(type = "metadata", column = "six_q_del", label = "6q deletion", order = c("normal", "deleted")),
+        gender = list(type = "metadata", column = "Gender", label = "Gender", order = c("female", "male")),
+        source_cohort = list(type = "metadata", column = "Source_cohort", label = "Source cohort", order = c("BWH/DFCI/Mayo", "Mayo/Iowa"))
+      ),
+      boxplot_comparisons = list(
+        RCHOP_like = list(column = "RCHOP_like", title = "R-CHOP-like treatment", order = c("no", "yes"), available_in = "total", labels = c("no" = "NO", "yes" = "YES")),
+        COO_class = list(column = "COO_class", title = "COO class", order = c("GCB", "ABC", "UNC")),
+        CCC_class = list(column = "CCC_class", title = "CCC class", order = c("BCR", "HR", "OxPhos")),
+        Chapuy_cluster = list(column = "Chapuy_cluster", title = "Chapuy cluster", order = c("C0", "C1", "C2", "C3", "C4", "C5")),
+        Genomic_complexity = list(column = "Genomic_complexity", title = "Genomic complexity", order = c("clean", "complex")),
+        MYC_rearrangement = list(column = "MYC_rearrangement", title = "MYC rearranged vs WT", order = c("not-rearranged", "rearranged"), labels = c("not-rearranged" = "WT", "rearranged" = "REARRANGED")),
+        MYC_RNA = list(column = "MYC_RNA", title = "MYC high vs low", order = c("low", "high")),
+        BCL2_RNA = list(column = "BCL2_RNA", title = "BCL2 high vs low", order = c("low", "high")),
+        TP53_status = list(column = "TP53_status", title = "TP53 status", order = c("not-mutated", "mutated")),
+        six_q_del = list(column = "six_q_del", title = "6q deletion", order = c("normal", "deleted")),
+        Gender = list(column = "Gender", title = "Gender", order = c("female", "male")),
+        Source_cohort = list(column = "Source_cohort", title = "Source cohort", order = c("BWH/DFCI/Mayo", "Mayo/Iowa"))
+      ),
+      default_cohort = "total",
+      default_outcome = "PFS",
+      default_stratification = "basic",
+      default_boxplot = "COO_class"
+    )
+  }
+
+  if (all(file.exists(file.path(barrans_dir, c("expression.rds", "clinical.rds"))))) {
+    barrans_cohorts <- if (!is.null(barrans_info$cohorts)) barrans_info$cohorts else list(
+      total = list(label = "Total", n = NA_integer_),
+      rchop = list(label = "R-CHOP", filter_column = "Treatment", filter_value = "R-CHOP", n = NA_integer_),
+      non_curative = list(label = "Not curative intent", filter_column = "Treatment", filter_value = "not-curative-intent", n = NA_integer_)
+    )
+    registry$barrans_gse32918 <- list(
+      id = "barrans_gse32918",
+      label = barrans_info$display_name %||% "Barrans GSE32918",
+      reference = barrans_info$reference_label %||% "Barrans et al. GSE32918",
+      summary = paste0(
+        barrans_info$n_samples %||% 172, " patients; FFPE Illumina DASL expression; OS only; ",
+        "technical replicate arrays averaged; COO, treatment status, and gender annotations."
+      ),
+      data_type = barrans_info$expression_type %||% "Illumina DASL expression, curated gene symbols",
+      loader = "single_expression_clinical",
+      data_dir = barrans_dir,
+      expression = file.path(barrans_dir, "expression.rds"),
+      clinical = file.path(barrans_dir, "clinical.rds"),
+      cohorts = barrans_cohorts,
+      outcomes = list(OS = list(time = "OS_years", event = "OS_event", label = "Overall survival", xlab = "Time (years)", break_time_by = 1, axis_step = 1, axis_padding = 0.5, axis_left_padding = 0.4)),
+      stratifications = list(
+        basic = list(type = "expression_only", label = "Gene expression"),
+        myc_expression = list(type = "computed", column = "MYC_expression_group", label = "MYC expression median"),
+        treatment = list(type = "metadata", column = "Treatment", label = "Treatment", order = c("not-curative-intent", "R-CHOP"), available_in = "total", labels = c("not-curative-intent" = "NOT_CURATIVE", "R-CHOP" = "R_CHOP")),
+        coo_class = list(type = "metadata", column = "COO_class", label = "COO class", order = c("GCB", "ABC", "UNC")),
+        gender = list(type = "metadata", column = "Gender", label = "Gender", order = c("female", "male"))
+      ),
+      boxplot_comparisons = list(
+        Treatment = list(column = "Treatment", title = "Treatment status", order = c("not-curative-intent", "R-CHOP"), available_in = "total", labels = c("not-curative-intent" = "NOT_CURATIVE", "R-CHOP" = "R_CHOP")),
+        COO_class = list(column = "COO_class", title = "COO class", order = c("GCB", "ABC", "UNC")),
         Gender = list(column = "Gender", title = "Gender", order = c("female", "male"))
       ),
       default_cohort = "total",
