@@ -9,7 +9,7 @@ source(file.path(project_dir, "scripts", "analysis_functions.R"))
 
 gene_choices <- available_genes("total", file.path(project_dir, analysis_data_dir))
 dataset_choices <- names(analysis_datasets(file.path(project_dir, analysis_data_dir)))
-default_gene <- if ("CD82" %in% gene_choices) "CD82" else gene_choices[[1]]
+default_gene <- if ("MYC" %in% gene_choices) "MYC" else gene_choices[[1]]
 default_target <- if ("MYC" %in% gene_choices) "MYC" else gene_choices[[1]]
 
 named_labels <- function(x) {
