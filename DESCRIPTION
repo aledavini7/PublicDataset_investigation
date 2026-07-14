@@ -1,0 +1,18 @@
+Package: DLBCLPublicDatasetExplorer
+Title: Shiny Explorer for Curated Public DLBCL Expression Data
+Version: 0.1.0
+Authors@R: person("Alessandro", "Iacobucci", role = c("aut", "cre"))
+Description: A Shiny application and reproducible R scripts for exploring gene-level associations in the public Sha/REMoDLB DLBCL dataset.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Imports:
+    DT,
+    dplyr,
+    ggplot2,
+    readr,
+    shiny,
+    survival,
+    survminer,
+    tibble,
+    tidyr
+

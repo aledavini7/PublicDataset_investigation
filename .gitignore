@@ -1,0 +1,23 @@
+.DS_Store
+.Rhistory
+.RData
+.Rproj.user/
+
+# Generated analysis outputs can be rebuilt by the scripts.
+results/
+
+# Local project notes and legacy exploratory script.
+context.txt
+Public_dataset_investigation.R
+
+# Keep the curated public RDS files, but do not publish raw working copies
+# or supplementary files unless they are intentionally added later.
+sha/*.rds
+sha/sha_supplementary_tables/
+sha/sha_supplementary_tables/~$*
+
+# Local deployment/account metadata.
+rsconnect/
+
+# Curated RDS files are kept locally and deployed to shinyapps.io, but not tracked by GitHub.
+sha/curated_gene_symbols/*.rds

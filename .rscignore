@@ -1,0 +1,12 @@
+.DS_Store
+.Rhistory
+.RData
+.Rproj.user/
+results/
+reports/
+sha/*.rds
+sha/sha_supplementary_tables/
+Public_dataset_investigation.R
+context.txt
+rsconnect/
+
