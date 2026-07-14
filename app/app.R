@@ -41,9 +41,13 @@ ui <- fluidPage(
       .plot-wrap { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 4px; padding: 8px; margin-bottom: 12px; overflow-x: auto; }
       .status-text { color: #667085; font-size: 12px; margin: 4px 0 10px; }
       .download-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
+      .export-panel { display: grid; grid-template-columns: repeat(4, minmax(100px, 1fr)); gap: 10px; padding: 10px; margin: 8px 0 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 4px; }
+      .export-panel .form-group { margin-bottom: 0; }
+      .export-actions { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
       table.dataTable { font-size: 12px; }
       @media (max-width: 900px) {
         .app-shell { grid-template-columns: 1fr; }
+        .export-panel { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
         .sidebar-panel { position: static; }
       }
     "))
@@ -76,6 +80,16 @@ ui <- fluidPage(
           div(class = "status-text", textOutput("survival_status", inline = TRUE)),
           div(class = "plot-wrap", plotOutput("survival_plot", height = "560px")),
           div(class = "plot-wrap", plotOutput("survival_risk_table", height = "260px")),
+          div(
+            class = "export-panel",
+            selectInput("surv_plot_format", "Plot format", choices = c("png", "pdf"), selected = "png"),
+            numericInput("surv_plot_width", "KM width (in)", value = 6.5, min = 3, max = 20, step = 0.25),
+            numericInput("surv_plot_height", "KM height (in)", value = 5, min = 3, max = 20, step = 0.25),
+            numericInput("surv_plot_dpi", "PNG DPI", value = 300, min = 72, max = 600, step = 25),
+            numericInput("surv_table_width", "Risk width (in)", value = 6.5, min = 3, max = 20, step = 0.25),
+            numericInput("surv_table_height", "Risk height (in)", value = 2.2, min = 1.5, max = 20, step = 0.25),
+            div(class = "export-actions", downloadButton("download_survival_plot", "KM plot"), downloadButton("download_survival_risk", "Risk table"))
+          ),
           div(class = "download-row", downloadButton("download_survival_summary", "Summary CSV"), downloadButton("download_survival_samples", "Samples CSV")),
           DTOutput("survival_summary")
         ),
@@ -83,6 +97,14 @@ ui <- fluidPage(
           "Boxplots",
           div(class = "status-text", textOutput("boxplot_status", inline = TRUE)),
           div(class = "plot-wrap", plotOutput("boxplot_plot", height = "560px")),
+          div(
+            class = "export-panel",
+            selectInput("boxplot_format", "Plot format", choices = c("png", "pdf"), selected = "png"),
+            numericInput("boxplot_width", "Width (in)", value = 4.7, min = 3, max = 20, step = 0.25),
+            numericInput("boxplot_height", "Height (in)", value = 4.2, min = 3, max = 20, step = 0.25),
+            numericInput("boxplot_dpi", "PNG DPI", value = 300, min = 72, max = 600, step = 25),
+            div(class = "export-actions", downloadButton("download_boxplot_plot", "Plot"))
+          ),
           div(class = "download-row", downloadButton("download_boxplot_summary", "Summary CSV"), downloadButton("download_boxplot_pairwise", "Pairwise CSV")),
           DTOutput("boxplot_summary")
         ),
@@ -90,6 +112,14 @@ ui <- fluidPage(
           "Correlations",
           div(class = "status-text", textOutput("correlation_status", inline = TRUE)),
           div(class = "plot-wrap", plotOutput("correlation_plot", height = "560px")),
+          div(
+            class = "export-panel",
+            selectInput("correlation_format", "Plot format", choices = c("png", "pdf"), selected = "png"),
+            numericInput("correlation_width", "Width (in)", value = 5.2, min = 3, max = 20, step = 0.25),
+            numericInput("correlation_height", "Height (in)", value = 4.6, min = 3, max = 20, step = 0.25),
+            numericInput("correlation_dpi", "PNG DPI", value = 300, min = 72, max = 600, step = 25),
+            div(class = "export-actions", downloadButton("download_correlation_plot", "Plot"))
+          ),
           div(class = "download-row", downloadButton("download_correlation_summary", "Summary CSV"), downloadButton("download_correlation_values", "Values CSV")),
           DTOutput("correlation_summary")
         ),
@@ -152,6 +182,18 @@ server <- function(input, output, session) {
     validate(need(isTRUE(result$valid), result$reason %||% "Analysis could not be completed."))
   }
 
+  write_plot_file <- function(plot, file, format, width, height, dpi) {
+    if (format == "pdf") {
+      ggsave(file, plot, device = "pdf", width = width, height = height)
+    } else {
+      ggsave(file, plot, device = "png", width = width, height = height, dpi = dpi)
+    }
+  }
+
+  plot_filename <- function(prefix, format, ...) {
+    paste(safe_name(paste(prefix, ..., sep = "_")), format, sep = ".")
+  }
+
   output$survival_status <- renderText({
     result <- survival_result()
     if (isTRUE(result$valid)) {
@@ -183,6 +225,13 @@ server <- function(input, output, session) {
     result <- survival_result()
     valid_result(result)
     datatable(result$sample_groups, rownames = FALSE, options = list(pageLength = 12, scrollX = TRUE))
+  })
+
+  observeEvent(survival_result(), {
+    result <- survival_result()
+    if (isTRUE(result$valid)) {
+      updateNumericInput(session, "surv_table_height", value = result$risk_table_export_height)
+    }
   })
 
   output$boxplot_status <- renderText({
@@ -244,13 +293,50 @@ server <- function(input, output, session) {
     filename = function() paste("survival_summary", input$dataset, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome, "csv", sep = "."),
     content = function(file) write_csv(survival_result()$summary, file)
   )
+  output$download_survival_plot <- downloadHandler(
+    filename = function() {
+      plot_filename("survival_km", input$surv_plot_format, input$dataset, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome)
+    },
+    content = function(file) {
+      result <- survival_result()
+      valid_result(result)
+      write_plot_file(result$plot, file, input$surv_plot_format, input$surv_plot_width, input$surv_plot_height, input$surv_plot_dpi)
+    }
+  )
+  output$download_survival_risk <- downloadHandler(
+    filename = function() {
+      plot_filename("survival_risk_table", input$surv_plot_format, input$dataset, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome)
+    },
+    content = function(file) {
+      result <- survival_result()
+      valid_result(result)
+      write_plot_file(result$risk_table, file, input$surv_plot_format, input$surv_table_width, input$surv_table_height, input$surv_plot_dpi)
+    }
+  )
   output$download_survival_samples <- downloadHandler(
     filename = function() paste("survival_samples", input$dataset, toupper(input$gene), input$surv_stratification, input$surv_grouping, input$surv_outcome, "csv", sep = "."),
     content = function(file) write_csv(survival_result()$sample_groups, file)
   )
+  observeEvent(boxplot_result(), {
+    result <- boxplot_result()
+    if (isTRUE(result$valid)) {
+      updateNumericInput(session, "boxplot_width", value = result$plot_width)
+      updateNumericInput(session, "boxplot_height", value = result$plot_height)
+    }
+  })
   output$download_boxplot_summary <- downloadHandler(
     filename = function() paste("boxplot_summary", input$dataset, toupper(input$gene), input$box_comparison, "csv", sep = "."),
     content = function(file) write_csv(boxplot_result()$summary, file)
+  )
+  output$download_boxplot_plot <- downloadHandler(
+    filename = function() {
+      plot_filename("boxplot", input$boxplot_format, input$dataset, toupper(input$gene), input$box_comparison)
+    },
+    content = function(file) {
+      result <- boxplot_result()
+      valid_result(result)
+      write_plot_file(result$plot, file, input$boxplot_format, input$boxplot_width, input$boxplot_height, input$boxplot_dpi)
+    }
   )
   output$download_boxplot_pairwise <- downloadHandler(
     filename = function() paste("boxplot_pairwise", input$dataset, toupper(input$gene), input$box_comparison, "csv", sep = "."),
@@ -259,6 +345,16 @@ server <- function(input, output, session) {
   output$download_correlation_summary <- downloadHandler(
     filename = function() paste("correlation_summary", input$dataset, toupper(input$gene), toupper(input$target_gene), "csv", sep = "."),
     content = function(file) write_csv(correlation_result()$summary, file)
+  )
+  output$download_correlation_plot <- downloadHandler(
+    filename = function() {
+      plot_filename("correlation", input$correlation_format, input$dataset, toupper(input$gene), toupper(input$target_gene))
+    },
+    content = function(file) {
+      result <- correlation_result()
+      valid_result(result)
+      write_plot_file(result$plot, file, input$correlation_format, input$correlation_width, input$correlation_height, input$correlation_dpi)
+    }
   )
   output$download_correlation_values <- downloadHandler(
     filename = function() paste("correlation_values", input$dataset, toupper(input$gene), toupper(input$target_gene), "csv", sep = "."),

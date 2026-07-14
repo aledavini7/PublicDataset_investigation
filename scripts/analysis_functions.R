@@ -541,6 +541,7 @@ run_survival_analysis <- function(dataset_name, gene, grouping, outcome_name, an
     sample_groups = sample_groups,
     plot = plots$plot,
     risk_table = plots$risk_table,
+    risk_table_export_height = plots$risk_table_export_height,
     output_paths = output_paths
   )
 }
